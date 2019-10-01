@@ -4,15 +4,16 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "threads/synch.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
-  {
-    THREAD_RUNNING,     /* Running thread. */
-    THREAD_READY,       /* Not running but ready to run. */
-    THREAD_BLOCKED,     /* Waiting for an event to trigger. */
-    THREAD_DYING        /* About to be destroyed. */
-  };
+{
+  THREAD_RUNNING,     /* Running thread. */
+  THREAD_READY,       /* Not running but ready to run. */
+  THREAD_BLOCKED,     /* Waiting for an event to trigger. */
+  THREAD_DYING        /* About to be destroyed. */
+};
 
 /* Thread identifier type.
    You can redefine this to whatever type you like. */
@@ -23,6 +24,21 @@ typedef int tid_t;
 #define PRI_MIN 0                       /* Lowest priority. */
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
+
+#define NICE_MIN -20                    /* Lowest NICE value. */
+#define NICE_DEFAULT 0                  /* Default NICE value. */
+#define NICE_MAX 20                     /* Highest NICE value. */
+
+#define FD_MIN 3                        /* Lowest FD value. */
+#define FD_MAX 128                      /* Highest FD value. */
+
+#define EXIT_ERROR -1                   /* Error exit status. */
+
+/* Stack growth limit */
+#define ESP_LIMIT ((uintptr_t) PHYS_BASE - 0x800000)
+
+/* Fixed pointer type */
+typedef signed int fixed_t;
 
 /* A kernel thread or user process.
 
@@ -83,23 +99,29 @@ typedef int tid_t;
 struct thread
   {
     /* Owned by thread.c. */
-    tid_t tid;                          /* Thread identifier. */
-    enum thread_status status;          /* Thread state. */
-    char name[16];                      /* Name (for debugging purposes). */
-    uint8_t *stack;                     /* Saved stack pointer. */
-    int priority;                       /* Priority. */
-    struct list_elem allelem;           /* List element for all threads list. */
-
+    tid_t tid;                 /* Thread identifier. */
+    enum thread_status status; /* Thread state. */
+    char name[16];             /* Name (for debugging purposes). */
+    uint8_t *stack;            /* Saved stack pointer. */
+    int priority;              /* Priority. */
+    int default_priority;      /* Default priority. */
+    struct list_elem allelem;  /* List element for all threads list. */
+    int nice;                  /* How NICE the thread is. */
+    fixed_t recent_cpu;        /* How much CPU time has received recently. */
+  
     /* Shared between thread.c and synch.c. */
-    struct list_elem elem;              /* List element. */
-
-#ifdef USERPROG
+    struct list_elem elem;            /* List element. */
+    struct list_elem waiting_elem;    /* Elem of waiting list used in lock */
+    struct lock *waiting_lock;        /* Lock which thread is waiting */
+    struct list holding_locks;        /* List of locks thread is holding */
+  
+  #ifdef USERPROG
     /* Owned by userprog/process.c. */
-    uint32_t *pagedir;                  /* Page directory. */
-#endif
-
+    uint32_t *pagedir;              /* Page directory. */
+  #endif
+  
     /* Owned by thread.c. */
-    unsigned magic;                     /* Detects stack overflow. */
+    unsigned magic; /* Detects stack overflow. */
   };
 
 /* If false (default), use round-robin scheduler.
@@ -132,6 +154,8 @@ void thread_foreach (thread_action_func *, void *);
 
 int thread_get_priority (void);
 void thread_set_priority (int);
+
+void thread_priority_donate (struct thread *t);
 
 int thread_get_nice (void);
 void thread_set_nice (int);
