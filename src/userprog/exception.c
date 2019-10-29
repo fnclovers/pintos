@@ -122,6 +122,7 @@ kill (struct intr_frame *f)
 static void
 page_fault (struct intr_frame *f) 
 {
+  struct thread *t = thread_current ();
   bool not_present;  /* True: not-present page, false: writing r/o page. */
   bool write;        /* True: access was write, false: access was read. */
   bool user;         /* True: access by user, false: access by kernel. */
@@ -142,6 +143,10 @@ page_fault (struct intr_frame *f)
 
   /* Count page faults. */
   page_fault_cnt++;
+
+  /* Exit if process is user process */
+  if (t->has_parent_process)
+    thread_exit ();
 
   /* Determine cause. */
   not_present = (f->error_code & PF_P) == 0;
