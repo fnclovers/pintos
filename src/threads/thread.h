@@ -118,7 +118,9 @@ struct thread
     void *free_before_exit;
     /* True if thread has parent, false otherwise. */
     bool has_parent_process;
-    int exit_status;   /* Exit status of this thread. */
+    int exit_status;           /* Exit status of this thread. */
+    struct vm_table *vm_table; /* Table of virtual memory. */
+    uintptr_t esp_min;         /* Minimum esp mapped with this proccess. */
 #endif
 
     /* Owned by thread.c. */

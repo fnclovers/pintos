@@ -4,6 +4,8 @@
 #include "userprog/gdt.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "threads/vaddr.h"
+#include "vm/vm.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -127,6 +129,7 @@ page_fault (struct intr_frame *f)
   bool write;        /* True: access was write, false: access was read. */
   bool user;         /* True: access by user, false: access by kernel. */
   void *fault_addr;  /* Fault address. */
+  uintptr_t esp_min = t->esp_min;
 
   /* Obtain faulting address, the virtual address that was
      accessed to cause the fault.  It may point to code or to
@@ -144,9 +147,29 @@ page_fault (struct intr_frame *f)
   /* Count page faults. */
   page_fault_cnt++;
 
-  /* Exit if process is user process */
-  if (t->has_parent_process)
-    thread_exit ();
+  /* Handle page fault */
+  if (t->vm_table != NULL)
+    {
+      /* Fault address should be user vaddr */
+      if (!is_user_vaddr (fault_addr))
+        thread_exit ();
+      /* If fault address is on table, load page to memory */
+      else if (load_uaddr (t->vm_table, fault_addr))
+        return;
+      /* If esp need to growth, map a page to vm table */
+      else if ((uintptr_t) f->esp < esp_min + 32
+               && (uintptr_t) f->esp >= ESP_LIMIT)
+        {
+          esp_min -= PGSIZE;
+          if (!mmap_a_page (t->vm_table, t->pagedir, (uint8_t *) esp_min))
+            thread_exit ();
+          t->esp_min = esp_min;
+          return;
+        }
+
+      if (t->has_parent_process)
+        thread_exit ();
+    }
 
   /* Determine cause. */
   not_present = (f->error_code & PF_P) == 0;

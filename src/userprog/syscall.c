@@ -1,6 +1,7 @@
 #include "userprog/syscall.h"
 #include <stdio.h>
 #include <string.h>
+#include <round.h>
 #include <syscall-nr.h>
 #include "userprog/process.h"
 #include "threads/interrupt.h"
@@ -11,6 +12,7 @@
 #include "devices/input.h"
 #include "filesys/filesys.h"
 #include "filesys/file.h"
+#include "vm/vm.h"
 
 /* System call number used in system call handler */
 #define NUMBER *((int *) is_user_bytes (f->esp, 4))
@@ -157,6 +159,7 @@ static void
 syscall_handler (struct intr_frame *f)
 {
   struct thread *t = thread_current ();
+  struct vm_map *vm_map;
   char *str = NULL;
   void *buffer = NULL;
   int32_t arg0, arg1, arg2;
@@ -252,9 +255,11 @@ syscall_handler (struct intr_frame *f)
         {
           size_t i;
           for (i = 0; i < (size_t) arg2; i++)
-            *((uint8_t *) (buffer + i)) = input_getc ();
+            {
+              if ((*((uint8_t *) (buffer + i)) = input_getc ()) == '\0')
+                break;
+            }
           f->eax = arg2;
-          memcpy ((void *) arg1, buffer, arg2);
         }
       else
         {
@@ -266,8 +271,11 @@ syscall_handler (struct intr_frame *f)
           lock_acquire (&filesys_lock);
           f->eax = file_read (t->fds[arg0], buffer, (off_t) arg2);
           lock_release (&filesys_lock);
-          memcpy ((void *) arg1, buffer, arg2);
         }
+
+      t->free_before_exit = buffer;
+      memcpy ((void *) arg1, buffer, arg2);
+      t->free_before_exit = NULL;
       break;
 
     /* Writes size bytes from buffer to the open file fd. Returns the
@@ -331,6 +339,64 @@ syscall_handler (struct intr_frame *f)
       file_close (t->fds[arg0]);
       lock_release (&filesys_lock);
       t->fds[arg0] = NULL;
+      break;
+
+    /* Maps the file open as fd into the process's virtual address space.
+       The entire file is mapped into consecutive virtual pages starting at
+       addr. Your VM system must lazily load pages in mmap regions and use
+       the mmaped file itself as backing store for the mapping. That is,
+       evicting a page mapped by mmap writes it back to the file it was
+       mapped from.
+
+       If the file's length is not a multiple of PGSIZE, then some bytes in
+       the final mapped page "stick out" beyond the end of the file. Set
+       these bytes to zero when the page is faulted in from the file
+       system, and discard them when the page is written back to disk.
+
+       If successful, this function returns a "mapping ID" that uniquely
+       identifies the mapping within the process. On failure, it must
+       return -1, which otherwise should not be a valid mapping id, and the
+       process's mappings must be unchanged.
+
+       A call to mmap may fail if the file open as fd has a length of zero
+       bytes. It must fail if addr is not page-aligned or if the range of
+       pages mapped overlaps any existing set of mapped pages, including
+       the stack or pages mapped at executable load time. It must also fail
+       if addr is 0, because some Pintos code assumes virtual page 0 is not
+       mapped. Finally, file descriptors 0 and 1, representing console
+       input and output, are not mappable. */
+    case SYS_MMAP:
+      arg0 = ARG0;
+      arg1 = ARG1;
+      if (!is_valid_fd (t->fds, arg0))
+        thread_exit ();
+
+      is_user_bytes ((uint8_t *) arg1, (size_t) arg0);
+
+      f->eax = -1;
+      /* Input addr must be not NULL and its page offset should be 0 */
+      if ((void *) arg1 == NULL || pg_ofs ((void *) arg1) != 0)
+        break;
+      off_t len = file_length (t->fds[arg0]);
+      if (len == 0)
+        break;
+
+      /* Maps the file to input addr and return mapid */
+      vm_map = mmap_segment (t->vm_table, t->fds[arg0], 0, t->pagedir,
+                             (uint8_t *) arg1, len,
+                             ROUND_UP (len, PGSIZE) - len, true, true);
+      f->eax = vm_map_to_mapid (vm_map);
+      break;
+
+    /* Unmaps the mapping designated by mapping, which must be a mapping ID
+       returned by a previous call to mmap by the same process that has not
+       yet been unmapped. */
+    case SYS_MUNMAP:
+      arg0 = ARG0;
+      vm_map = mapid_to_vm_map (t->vm_table, arg0);
+      if (vm_map == NULL)
+        thread_exit ();
+      munmap (t->vm_table, vm_map);
       break;
 
     default:

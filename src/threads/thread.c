@@ -468,8 +468,10 @@ init_thread (struct thread *t, const char *name, int priority)
   t->fds = NULL;
   t->execute_file = NULL;
   t->free_before_exit = NULL;
+  t->vm_table = NULL;
   t->has_parent_process = false;
   t->exit_status = EXIT_ERROR;
+  t->esp_min = (uint32_t) PHYS_BASE;
   list_init (&t->child_process_list);
 #endif
 
