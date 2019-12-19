@@ -217,6 +217,17 @@ start_process (void *cmd_)
   if ((t->fds = calloc (FD_MAX, sizeof (struct file *))) == NULL)
     goto done;
 
+#ifdef FILESYS
+  /* Initialize working directory. */
+  if (parent_t->working_dir == NULL)
+    t->working_dir = dir_open_root ();
+  else
+    t->working_dir = dir_reopen (parent_t->working_dir);
+
+  if (t->working_dir == NULL)
+    goto done;
+#endif
+
   success = true;
   t->has_parent_process = true;
   /* Cannot write execute file while program is running */
@@ -323,6 +334,11 @@ process_exit (void)
     }
   file_close (cur->execute_file);
   free (cur->free_before_exit);
+
+#ifdef FILESYS
+  /* Close current proccess's directory */
+  dir_close (cur->working_dir);
+#endif
 
   if (cur->has_parent_process)
     {

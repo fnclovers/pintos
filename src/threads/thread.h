@@ -123,6 +123,10 @@ struct thread
     uintptr_t esp_min;         /* Minimum esp mapped with this proccess. */
 #endif
 
+#ifdef FILESYS
+    struct dir *working_dir; /* Working directory of thread */
+#endif
+
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
   };

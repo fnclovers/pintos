@@ -10,6 +10,7 @@
 #include "threads/vaddr.h"
 #include "devices/shutdown.h"
 #include "devices/input.h"
+#include "filesys/directory.h"
 #include "filesys/filesys.h"
 #include "filesys/file.h"
 #include "vm/vm.h"
@@ -398,6 +399,62 @@ syscall_handler (struct intr_frame *f)
         thread_exit ();
       munmap (t->vm_table, vm_map);
       break;
+
+#ifdef FILESYS
+    case SYS_CHDIR:
+      arg0 = ARG0;
+      str = user_str_dup ((char *) arg0);
+      lock_acquire (&filesys_lock);
+      f->eax = change_working_dir (t, str);
+      lock_release (&filesys_lock);
+      break;
+
+    case SYS_MKDIR:
+      arg0 = ARG0;
+      str = user_str_dup ((char *) arg0);
+      lock_acquire (&filesys_lock);
+      f->eax = filesys_dir_create (str);
+      lock_release (&filesys_lock);
+      break;
+
+    case SYS_READDIR:
+      arg0 = ARG0;
+      arg1 = ARG1;
+      buffer = user_bytes_dup ((uint8_t *) arg1, NAME_MAX + 1);
+
+      if (!is_valid_fd (t->fds, arg0))
+        thread_exit ();
+
+      lock_acquire (&filesys_lock);
+      f->eax = file_readdir (t->fds[arg0], buffer);
+      lock_release (&filesys_lock);
+
+      if (f->eax)
+        {
+          t->free_before_exit = buffer;
+          memcpy ((void *) arg1, buffer, NAME_MAX + 1);
+          t->free_before_exit = NULL;
+        }
+      break;
+
+    case SYS_ISDIR:
+      arg0 = ARG0;
+      if (!is_valid_fd (t->fds, arg0))
+        thread_exit ();
+      lock_acquire (&filesys_lock);
+      f->eax = file_is_dir (t->fds[arg0]);
+      lock_release (&filesys_lock);
+      break;
+
+    case SYS_INUMBER:
+      arg0 = ARG0;
+      if (!is_valid_fd (t->fds, arg0))
+        thread_exit ();
+      lock_acquire (&filesys_lock);
+      f->eax = file_get_inumber (t->fds[arg0]);
+      lock_release (&filesys_lock);
+      break;
+#endif
 
     default:
       thread_exit ();
